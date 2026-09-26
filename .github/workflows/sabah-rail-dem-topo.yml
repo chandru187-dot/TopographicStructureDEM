@@ -1,0 +1,47 @@
+name: Build Sabah Rail DEM Topo
+
+on:
+  push:
+    branches:
+      - sabah-rail-dem-topo
+    paths:
+      - "data/Sabah_Rail_Study_Area_and_Alignment.geojson"
+      - "tools/sabah_rail_dem_topo.py"
+      - "requirements-sabah-dem.txt"
+      - ".github/workflows/sabah-rail-dem-topo.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-sabah-dem.txt
+
+      - name: Build Sabah Rail DEM and topographic package
+        run: |
+          python tools/sabah_rail_dem_topo.py
+
+      - name: Verify outputs
+        run: |
+          find output/sabah_rail_dem_topo -maxdepth 1 -type f -printf "%f %s bytes\n"
+          test -s output/sabah_rail_dem_topo/Sabah_Rail_DEM_Topographic_Map.png
+          test -s output/sabah_rail_dem_topo/Sabah_Rail_DEM_GLO30_UTM50N.tif
+          test -s output/sabah_rail_dem_topo/Sabah_Rail_DEM_UTM50N.xyz
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sabah-rail-dem-topo
+          path: output/sabah_rail_dem_topo/
+          if-no-files-found: error
+          retention-days: 30
