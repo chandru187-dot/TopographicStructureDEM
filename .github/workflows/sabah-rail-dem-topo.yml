@@ -34,7 +34,8 @@ jobs:
       - name: Verify outputs
         run: |
           find output/sabah_rail_dem_topo -maxdepth 1 -type f -printf "%f %s bytes\n"
-          test -s output/sabah_rail_dem_topo/Sabah_Rail_DEM_Topographic_Map.png
+          test -s output/sabah_rail_dem_topo/Sabah_Rail_DEM_Topographic_Base_Map_NO_ALIGNMENT.png
+          test -s output/sabah_rail_dem_topo/Sabah_Rail_DEM_Topographic_Alignment_Overlay.png
           test -s output/sabah_rail_dem_topo/Sabah_Rail_DEM_GLO30_UTM50N.tif
           test -s output/sabah_rail_dem_topo/Sabah_Rail_DEM_UTM50N.xyz
 
