@@ -1,0 +1,43 @@
+name: Build Sabah Rail White Vector Basemap
+
+on:
+  push:
+    branches:
+      - sabah-rail-white-vector-basemap
+    paths:
+      - "tools/sabah_rail_white_vector_basemap.py"
+      - "requirements-white-vector-map.txt"
+      - "data/Sabah_Rail_Study_Area_and_Alignment.geojson"
+      - ".github/workflows/sabah-rail-white-vector-basemap.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-white-vector-map.txt
+      - name: Build white vector basemap
+        run: |
+          python tools/sabah_rail_white_vector_basemap.py
+      - name: Verify outputs
+        run: |
+          find output/sabah_rail_white_vector_basemap -maxdepth 1 -type f -printf "%f %s bytes\n"
+          test -s output/sabah_rail_white_vector_basemap/Sabah_Rail_White_Vector_Basemap.svg
+          test -s output/sabah_rail_white_vector_basemap/Sabah_Rail_White_Vector_Basemap.pdf
+          test -s output/sabah_rail_white_vector_basemap/Sabah_Rail_White_Vector_Basemap_8K.png
+          test -s output/sabah_rail_white_vector_basemap/Existing_Buildings_OSM.geojson
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sabah-rail-white-vector-basemap
+          path: output/sabah_rail_white_vector_basemap/
+          if-no-files-found: error
+          retention-days: 30
