@@ -99,7 +99,7 @@ def fetch_mbsa_boundary(session: requests.Session):
         try:
             params2 = {
                 "where": "1=1",
-                "outFields": "N_PBT1",
+                "outFields": "*",
                 "returnGeometry": "true",
                 "outSR": "4326",
                 "f": "geojson",
@@ -108,10 +108,11 @@ def fetch_mbsa_boundary(session: requests.Session):
             r2.raise_for_status()
             data2 = r2.json()
             feats2 = data2.get("features", [])
-            matches = [
-                f for f in feats2
-                if "SHAH ALAM" in str(f.get("properties", {}).get("N_PBT1", "")).upper()
-            ]
+            matches = []
+            for f in feats2:
+                props_text = json.dumps(f.get("properties", {}), ensure_ascii=False).upper()
+                if "SHAH ALAM" in props_text or "MBSA" in props_text:
+                    matches.append(f)
             if not matches:
                 raise RuntimeError("JPS PBT query returned no Shah Alam feature")
             geom = unary_union([shape(f["geometry"]) for f in matches])
