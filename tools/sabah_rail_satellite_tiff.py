@@ -77,20 +77,24 @@ def search_sentinel(intersects, months=18, cloud_lt=35, limit=60):
         "intersects": mapping(intersects),
         "datetime": f"{start.date().isoformat()}/{end.date().isoformat()}",
         "limit": limit,
-        "query": {"eo:cloud_cover": {"lt": cloud_lt}},
     }
     r = requests.post(STAC_URL, json=payload, timeout=120)
-    r.raise_for_status()
+    if not r.ok:
+        raise RuntimeError(f"Earth Search STAC error {r.status_code}: {r.text[:1000]}")
     js = r.json()
     feats = js.get("features", [])
     if not feats:
-        # retry without cloud threshold
-        payload.pop("query", None)
-        r = requests.post(STAC_URL, json=payload, timeout=120)
-        r.raise_for_status()
-        feats = r.json().get("features", [])
-    if not feats:
         raise RuntimeError("No Sentinel-2 scenes found for the Sabah Rail study area.")
+
+    # Apply the requested scene-cloud threshold locally so the workflow
+    # remains compatible with STAC servers that do not enable the Query extension.
+    filtered = []
+    for item in feats:
+        cc = item.get("properties", {}).get("eo:cloud_cover")
+        if cc is None or float(cc) < cloud_lt:
+            filtered.append(item)
+    if filtered:
+        feats = filtered
 
     def dt(item):
         return item.get("properties", {}).get("datetime", "")
