@@ -42,6 +42,11 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sabah-rail-dem-topo
-          path: output/sabah_rail_dem_topo/
+          path: |
+            output/sabah_rail_dem_topo/*.png
+            output/sabah_rail_dem_topo/*.tif
+            output/sabah_rail_dem_topo/*.geojson
+            output/sabah_rail_dem_topo/*.xyz
+            output/sabah_rail_dem_topo/*.json
           if-no-files-found: error
           retention-days: 30
