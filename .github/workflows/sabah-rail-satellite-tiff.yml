@@ -1,0 +1,48 @@
+name: Build Sabah Rail Satellite GeoTIFF
+
+on:
+  push:
+    branches:
+      - sabah-rail-satellite-tiff
+    paths:
+      - "tools/sabah_rail_satellite_tiff.py"
+      - "requirements-satellite-tiff.txt"
+      - "data/Sabah_Rail_Study_Area_and_Alignment.geojson"
+      - ".github/workflows/sabah-rail-satellite-tiff.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-satellite-tiff.txt
+
+      - name: Build Sentinel-2 GeoTIFF
+        run: |
+          python tools/sabah_rail_satellite_tiff.py
+
+      - name: Verify outputs
+        run: |
+          find output/sabah_rail_satellite -maxdepth 1 -type f -printf "%f %s bytes\n"
+          test -s output/sabah_rail_satellite/Sabah_Rail_Sentinel2_RGB_10m_UTM50N.tif
+          test -s output/sabah_rail_satellite/Sabah_Rail_Sentinel2_RGB_10m_Corridor_UTM50N.tif
+          test -s output/sabah_rail_satellite/Sabah_Rail_Sentinel2_RGB_10m_WGS84.tif
+          test -s output/sabah_rail_satellite/Sabah_Rail_Sentinel2_RGB_Preview.png
+
+      - name: Upload satellite package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sabah-rail-satellite-geotiff
+          path: output/sabah_rail_satellite/
+          if-no-files-found: error
+          retention-days: 30
