@@ -1,0 +1,49 @@
+name: Build Sabah Rail Existing Infrastructure Map
+
+on:
+  push:
+    branches:
+      - sabah-rail-infrastructure-map
+    paths:
+      - "tools/sabah_rail_infrastructure_map.py"
+      - "requirements-infrastructure-map.txt"
+      - "data/Sabah_Rail_Study_Area_and_Alignment.geojson"
+      - ".github/workflows/sabah-rail-infrastructure-map.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-infrastructure-map.txt
+
+      - name: Build existing infrastructure map
+        run: |
+          python tools/sabah_rail_infrastructure_map.py
+
+      - name: Verify outputs
+        run: |
+          find output/sabah_rail_infrastructure -maxdepth 1 -type f -printf "%f %s bytes\n"
+          test -s output/sabah_rail_infrastructure/Sabah_Rail_Existing_Infrastructure_Slide_4K.png
+          test -s output/sabah_rail_infrastructure/Sabah_Rail_Existing_Infrastructure_MapOnly_4K.png
+          test -s output/sabah_rail_infrastructure/Existing_Road_Network_OSM.geojson
+          test -s output/sabah_rail_infrastructure/Existing_Railway_and_Stations_OSM.geojson
+
+      - name: Upload presentation map package
+        uses: actions/upload-artifact@v4
+        with:
+          name: sabah-rail-existing-infrastructure-map
+          path: output/sabah_rail_infrastructure/
+          if-no-files-found: error
+          retention-days: 30
