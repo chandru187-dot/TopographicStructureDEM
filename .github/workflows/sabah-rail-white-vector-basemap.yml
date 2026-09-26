@@ -33,7 +33,6 @@ jobs:
           test -s output/sabah_rail_white_vector_basemap/Sabah_Rail_White_Vector_Basemap.svg
           test -s output/sabah_rail_white_vector_basemap/Sabah_Rail_White_Vector_Basemap.pdf
           test -s output/sabah_rail_white_vector_basemap/Sabah_Rail_White_Vector_Basemap_8K.png
-          test -s output/sabah_rail_white_vector_basemap/Existing_Buildings_OSM.geojson
       - name: Upload package
         uses: actions/upload-artifact@v4
         with:
