@@ -14,7 +14,7 @@ Outputs:
 - SVG vector map (best for deep zoom / editing)
 - PDF vector map
 - 8K and 4K PNGs
-- Extracted building/road/rail/infrastructure GeoJSONs
+- Extracted road/infrastructure GeoJSONs; buildings are embedded in the vector map
 """
 
 from __future__ import annotations
@@ -76,15 +76,6 @@ def expand_bbox(bounds, pad_deg=0.025):
     return (minx-pad_deg, miny-pad_deg, maxx+pad_deg, maxy+pad_deg)
 
 
-def split_bbox(bbox, nx=3, ny=3):
-    left, bottom, right, top = bbox
-    xs = np.linspace(left, right, nx+1)
-    ys = np.linspace(bottom, top, ny+1)
-    for i in range(nx):
-        for j in range(ny):
-            yield (float(xs[i]), float(ys[j]), float(xs[i+1]), float(ys[j+1]))
-
-
 def safe_features_from_bbox(bbox, tags):
     try:
         g = ox.features.features_from_bbox(bbox, tags)
@@ -94,41 +85,17 @@ def safe_features_from_bbox(bbox, tags):
         return gpd.GeoDataFrame(geometry=[], crs=PROJECT_CRS)
 
 
-def query_buildings_tiled(bbox):
-    parts=[]
-    for i, b in enumerate(split_bbox(bbox, 3, 3), start=1):
-        print("Building tile", i, b)
-        g = safe_features_from_bbox(b, {"building": True})
-        if len(g):
-            parts.append(g)
-    if not parts:
+def query_buildings_polygon(poly_wgs84):
+    try:
+        print("Querying detailed building footprints inside buffered study corridor...")
+        g = ox.features.features_from_polygon(poly_wgs84, {"building": True})
+        return g.reset_index(drop=False)
+    except Exception as exc:
+        print("Building polygon query failed:", repr(exc))
         return gpd.GeoDataFrame(geometry=[], crs=PROJECT_CRS)
-    g = gpd.GeoDataFrame(
-        np.concat([p.to_records(index=False) for p in parts])
-    )
-    # The reconstruction above can be awkward for geometry dtype; fallback to concat when needed.
-    return g
 
 
-def query_buildings_tiled_safe(bbox):
-    import pandas as pd
-    parts=[]
-    for i, b in enumerate(split_bbox(bbox, 3, 3), start=1):
-        print("Building tile", i, b)
-        g = safe_features_from_bbox(b, {"building": True})
-        if len(g):
-            parts.append(g)
-    if not parts:
-        return gpd.GeoDataFrame(geometry=[], crs=PROJECT_CRS)
-    out = pd.concat(parts, ignore_index=True)
-    out = gpd.GeoDataFrame(out, geometry="geometry", crs=parts[0].crs or PROJECT_CRS)
-    # Remove exact duplicate geometries introduced along tile edges.
-    out["_wkb"] = out.geometry.apply(lambda x: x.wkb_hex if x is not None else "")
-    out = out.drop_duplicates("_wkb").drop(columns=["_wkb"])
-    return out
-
-
-def query_osm(bbox):
+def query_osm(bbox, building_polygon):
     ox.settings.requests_timeout = 240
     ox.settings.overpass_rate_limit = True
     ox.settings.log_console = True
@@ -144,7 +111,7 @@ def query_osm(bbox):
     roads = ox.convert.graph_to_gdfs(G, nodes=False, edges=True).reset_index(drop=True)
     roads["map_class"] = roads["highway"].apply(road_class)
 
-    buildings = query_buildings_tiled_safe(bbox)
+    buildings = query_buildings_polygon(building_polygon)
 
     tags = {
         "railway": ["rail","station","halt","yard"],
@@ -284,11 +251,19 @@ def main():
     outdir.mkdir(parents=True, exist_ok=True)
 
     corridor=load_corridor(Path(args.input))
-    bbox=expand_bbox(corridor.bounds, 0.03)
-    roads,buildings,infra=query_osm(bbox)
+
+    # Detailed building footprints only where presentation zooming matters:
+    # the actual study corridor plus 1.5 km context.
+    to_utm=Transformer.from_crs(PROJECT_CRS, MAP_CRS, always_xy=True)
+    to_wgs=Transformer.from_crs(MAP_CRS, PROJECT_CRS, always_xy=True)
+    corridor_u=shp_transform(to_utm.transform, corridor)
+    building_context=shp_transform(to_wgs.transform, corridor_u.buffer(1500))
+
+    # Roads/infrastructure keep slightly wider context for map continuity.
+    bbox=expand_bbox(corridor.bounds, 0.02)
+    roads,buildings,infra=query_osm(bbox, building_context)
 
     save_geojson(roads, outdir/"Existing_Roads_OSM.geojson")
-    save_geojson(buildings, outdir/"Existing_Buildings_OSM.geojson")
     save_geojson(infra, outdir/"Existing_Infrastructure_OSM.geojson")
 
     counts=make_map(
@@ -318,7 +293,6 @@ def main():
             "Sabah_Rail_White_Vector_Basemap_8K.png",
             "Sabah_Rail_White_Vector_Basemap_4K.png",
             "Existing_Roads_OSM.geojson",
-            "Existing_Buildings_OSM.geojson",
             "Existing_Infrastructure_OSM.geojson",
         ],
     }
