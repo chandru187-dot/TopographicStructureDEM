@@ -53,6 +53,11 @@ MBSA_LAYER = (
     "TABURAN_SISTEM_SALIRAN_MBSA/MapServer/0"
 )
 MBSA_QUERY = MBSA_LAYER + "/query"
+JPS_PBT_LAYER = (
+    "https://jpsselgis.selangor.gov.my/gis/rest/services/"
+    "_PBT/MapServer/0"
+)
+JPS_PBT_QUERY = JPS_PBT_LAYER + "/query"
 TERRARIUM_TEMPLATE = (
     "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 )
@@ -87,7 +92,41 @@ def fetch_mbsa_boundary(session: requests.Session):
             raise RuntimeError("MBSA boundary geometry is empty")
         return geom, data, True, None
     except Exception as exc:
-        # Fallback uses the official layer extent, transformed to WGS84.
+        primary_error = repr(exc)
+
+        # Secondary official source: Selangor JPS PBT boundary layer.
+        # Fetch the small PBT layer and select the Shah Alam local-authority polygon.
+        try:
+            params2 = {
+                "where": "1=1",
+                "outFields": "N_PBT1",
+                "returnGeometry": "true",
+                "outSR": "4326",
+                "f": "geojson",
+            }
+            r2 = session.get(JPS_PBT_QUERY, params=params2, timeout=45)
+            r2.raise_for_status()
+            data2 = r2.json()
+            feats2 = data2.get("features", [])
+            matches = [
+                f for f in feats2
+                if "SHAH ALAM" in str(f.get("properties", {}).get("N_PBT1", "")).upper()
+            ]
+            if not matches:
+                raise RuntimeError("JPS PBT query returned no Shah Alam feature")
+            geom = unary_union([shape(f["geometry"]) for f in matches])
+            if geom.is_empty:
+                raise RuntimeError("JPS Shah Alam boundary geometry is empty")
+            data = {"type": "FeatureCollection", "features": matches}
+            note = (
+                "Primary MBSA geometry query failed; used official Selangor JPS "
+                "PBT polygon instead. Primary error: " + primary_error
+            )
+            return geom, data, True, note
+        except Exception as exc2:
+            secondary_error = repr(exc2)
+
+        # Final fallback uses the official MBSA layer extent, transformed to WGS84.
         tr = Transformer.from_crs(3380, 4326, always_xy=True)
         minlon, minlat = tr.transform(
             MBSA_EXTENT_EPSG3380["xmin"], MBSA_EXTENT_EPSG3380["ymin"]
@@ -115,7 +154,11 @@ def fetch_mbsa_boundary(session: requests.Session):
                 }
             ],
         }
-        return geom, data, False, repr(exc)
+        note = (
+            "Both live boundary queries failed. MBSA: " + primary_error
+            + " | JPS PBT: " + secondary_error
+        )
+        return geom, data, False, note
 
 
 def lonlat_to_tile(lon: float, lat: float, z: int):
@@ -420,10 +463,11 @@ def main():
         "generated_utc": datetime.now(timezone.utc).isoformat(),
         "study_area": "Shah Alam, Selangor, Malaysia",
         "boundary_source": {
-            "name": "Majlis Bandaraya Shah Alam (MBSA) ArcGIS REST layer",
-            "layer_url": MBSA_LAYER,
+            "name": "Official Shah Alam boundary services",
+            "primary_mbsa_layer_url": MBSA_LAYER,
+            "secondary_selangor_jps_pbt_layer_url": JPS_PBT_LAYER,
             "query_used_live_geometry": boundary_live,
-            "fallback_error_if_any": boundary_error,
+            "source_note_or_error": boundary_error,
             "wgs84_bounds": [float(v) for v in geom4326.bounds],
         },
         "terrain_source": {
