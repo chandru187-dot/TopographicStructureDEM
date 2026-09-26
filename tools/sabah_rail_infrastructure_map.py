@@ -341,21 +341,21 @@ def render_map(
     fig = plt.figure(figsize=(16, 9))
     ax = fig.add_axes([0.035, 0.075, 0.77, 0.84] if titled else [0.025,0.04,0.81,0.92])
 
-    # Map extent around the OSM query/corridor context.
-    xmin, ymin, xmax, ymax = roads.total_bounds
-    if not np.all(np.isfinite([xmin,ymin,xmax,ymax])):
-        xmin, ymin, xmax, ymax = corridor_gdf.total_bounds
-    ax.set_xlim(xmin, xmax)
-    ax.set_ylim(ymin, ymax)
+    # Balanced presentation extent based on the project corridor.
+    # Add more east-west context so the long north-south corridor fills a 16:9 slide better.
+    cxmin, cymin, cxmax, cymax = corridor_gdf.total_bounds
+    ax.set_xlim(cxmin - 8500, cxmax + 8500)
+    ax.set_ylim(cymin - 3000, cymax + 3000)
 
     # Clean light basemap.
     try:
         cx.add_basemap(
             ax,
-            source=cx.providers.CartoDB.PositronNoLabels,
+            source=cx.providers.OpenStreetMap.Mapnik,
             crs=MAP_CRS,
             attribution=False,
             zoom="auto",
+            alpha=0.52,
             reset_extent=True,
         )
     except Exception as exc:
@@ -449,20 +449,13 @@ def render_map(
         )
 
     # Key infrastructure labels.
-    label_major_roads(ax, roads, max_labels=12)
-    label_points(ax, railway_points, max_labels=10, fontsize=8)
+    label_major_roads(ax, roads, max_labels=7)
+    label_points(ax, railway_points, max_labels=5, fontsize=8)
     label_points(ax, airport_poly, max_labels=4, fontsize=9)
-    label_points(ax, industrial, max_labels=7, fontsize=8)
-    label_points(ax, port_feats, max_labels=6, fontsize=8)
+    # Industrial and port polygons are symbolized but not mass-labelled to avoid clutter.
+    # KKIP and Sepanggar Port are already labelled from the verified project reference nodes.
 
-    # Add only a few meaningful place names to avoid clutter.
-    if len(places):
-        p = places.copy()
-        if "place" in p.columns:
-            priority = {"city":0,"town":1,"suburb":2,"village":3}
-            p["_prio"] = p["place"].apply(lambda v: priority.get(normalize_tag(v), 9))
-            p = p.sort_values("_prio")
-        label_points(ax, p.head(10), max_labels=10, fontsize=7.5)
+    # Place names are left to the OSM basemap; avoid duplicate text on the presentation layer.
 
     add_scale_bar(ax, 5)
     add_north_arrow(ax)
@@ -513,13 +506,13 @@ def render_map(
     panel.text(
         0.02, 0.335,
         "Mapped infrastructure includes:\n"
-        "• Complete OSM drivable road network\n"
-        "• Existing rail lines and stations\n"
-        "• Airport and runway infrastructure\n"
+        "• Drivable road network\n"
+        "• Existing railway + stations\n"
+        "• Airport + runways\n"
         "• Port / pier facilities\n"
         "• Industrial areas\n"
         "• Rivers / waterways\n"
-        "• Power lines / substations where mapped",
+        "• Power infrastructure where mapped",
         fontsize=8.3, va="top", linespacing=1.45
     )
 
@@ -620,7 +613,7 @@ def main():
         "source_notes": [
             "Existing infrastructure is based on OpenStreetMap features available at extraction time.",
             "The road network uses OSMnx drive_service network retrieval.",
-            "CARTO Positron No Labels is used as the light presentation basemap.",
+            "OpenStreetMap Mapnik tiles are used as a subdued presentation basemap.",
             "The Sabah Rail study boundary comes from the project-supplied GeoJSON.",
             "OSM is not an authoritative asset register; unmapped/private/new infrastructure may be absent.",
         ],
