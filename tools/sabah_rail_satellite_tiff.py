@@ -75,7 +75,7 @@ def search_sentinel(intersects, months=18, cloud_lt=35, limit=60):
     payload = {
         "collections": [COLLECTION],
         "intersects": mapping(intersects),
-        "datetime": f"{start.date().isoformat()}/{end.date().isoformat()}",
+        "datetime": f"{start.strftime('%Y-%m-%dT%H:%M:%SZ')}/{end.strftime('%Y-%m-%dT%H:%M:%SZ')}",
         "limit": limit,
     }
     r = requests.post(STAC_URL, json=payload, timeout=120)
