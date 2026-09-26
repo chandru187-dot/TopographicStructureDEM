@@ -255,7 +255,7 @@ def line_geoms(geom):
         yield from geom.geoms
 
 
-def make_map(out_png, dem_path, corridor, alignment, nodes, contour_fc, stats):
+def make_map(out_png, dem_path, corridor, alignment, nodes, contour_fc, stats, show_alignment=False):
     with rasterio.open(dem_path) as ds:
         arr = ds.read(1)
         transform = ds.transform
@@ -299,15 +299,16 @@ def make_map(out_png, dem_path, corridor, alignment, nodes, contour_fc, stats):
         bx, by = ext.xy
         ax.plot(bx, by, linewidth=2.2, label="Study corridor")
 
-    first=True
-    for ln in line_geoms(alignment_u):
-        lx, ly = ln.xy
-        ax.plot(lx, ly, linewidth=2.0, label="Feasible alignment" if first else None)
-        first=False
+    if show_alignment:
+        first=True
+        for ln in line_geoms(alignment_u):
+            lx, ly = ln.xy
+            ax.plot(lx, ly, linewidth=2.0, label="Feasible alignment (44.3 km)" if first else None)
+            first=False
 
-    for name, pt in nodes_u:
-        ax.scatter([pt.x], [pt.y], s=28, zorder=5)
-        ax.annotate(name, (pt.x, pt.y), xytext=(5, 5), textcoords="offset points", fontsize=8)
+        for name, pt in nodes_u:
+            ax.scatter([pt.x], [pt.y], s=28, zorder=5)
+            ax.annotate(name, (pt.x, pt.y), xytext=(5, 5), textcoords="offset points", fontsize=8)
 
     # North arrow
     ax.annotate(
@@ -325,9 +326,13 @@ def make_map(out_png, dem_path, corridor, alignment, nodes, contour_fc, stats):
     ax.plot([x0 + 5000, x0 + 5000], [y0 - 120, y0 + 120], linewidth=1)
     ax.text(x0 + 2500, y0 + 250, "5 km", ha="center", fontsize=8)
 
+    title = (
+        "Sabah Rail Study Area — DEM & Topographic Map with Feasible Alignment"
+        if show_alignment
+        else "Sabah Rail Study Area — DEM & Topographic Base Map"
+    )
     ax.set_title(
-        "Sabah Rail Study Area — DEM & Topographic Map\n"
-        "Putatan – KKIP – Sepanggar Port",
+        title + "\nPutatan – KKIP – Sepanggar Port",
         fontsize=15, pad=14,
     )
     ax.set_xlabel("Easting (m) — WGS 84 / UTM Zone 50N")
@@ -346,11 +351,17 @@ def make_map(out_png, dem_path, corridor, alignment, nodes, contour_fc, stats):
         bbox=dict(boxstyle="round,pad=0.3", facecolor="white", alpha=0.75),
     )
 
+    map_note = (
+        "Feasible alignment shown as a project overlay on the same terrain base."
+        if show_alignment
+        else "No railway alignment shown — terrain/topographic base only."
+    )
     fig.text(
         0.01, 0.008,
         "Terrain: Copernicus DEM GLO-30 Public (2021, DSM). "
-        "Project extent/alignment: supplied Sabah Rail study GeoJSON. "
-        "Feasibility-level terrain reference; not a substitute for engineering survey.",
+        "Study boundary: supplied Sabah Rail project GeoJSON. "
+        + map_note
+        + " Feasibility-level terrain reference; not a substitute for engineering survey.",
         fontsize=7.2,
     )
     fig.tight_layout(rect=[0, 0.025, 1, 1])
@@ -416,8 +427,16 @@ def main():
     project_path = outdir / "Sabah_Rail_Study_Area_and_Alignment.geojson"
     project_path.write_text(json.dumps(fc, indent=2), encoding="utf-8")
 
-    map_png = outdir / "Sabah_Rail_DEM_Topographic_Map.png"
-    make_map(map_png, dem_utm, corridor, alignment, nodes, contours, stats)
+    base_map_png = outdir / "Sabah_Rail_DEM_Topographic_Base_Map_NO_ALIGNMENT.png"
+    overlay_map_png = outdir / "Sabah_Rail_DEM_Topographic_Alignment_Overlay.png"
+    make_map(
+        base_map_png, dem_utm, corridor, alignment, nodes, contours, stats,
+        show_alignment=False
+    )
+    make_map(
+        overlay_map_png, dem_utm, corridor, alignment, nodes, contours, stats,
+        show_alignment=True
+    )
 
     metadata = {
         "generated_utc": datetime.now(timezone.utc).isoformat(),
@@ -450,8 +469,21 @@ def main():
             "Suitable for feasibility and regional terrain screening; verify with survey/LiDAR for final design.",
             "Contour interval does not imply survey-grade vertical accuracy.",
         ],
+        "map_versions": {
+            "clean_base_map": base_map_png.name,
+            "alignment_overlay_map": overlay_map_png.name,
+            "clean_base_definition": (
+                "DEM/topography, 10 m contours, elevation scale, north arrow, "
+                "scale bar and study-area boundary only; no railway alignment or project nodes."
+            ),
+            "overlay_definition": (
+                "Same terrain base with Proposed Feasible Alignment_ 44.3km "
+                "and project node labels overlaid."
+            ),
+        },
         "outputs": [
-            map_png.name,
+            base_map_png.name,
+            overlay_map_png.name,
             dem_wgs.name,
             dem_utm.name,
             contour_path.name,
