@@ -28,10 +28,10 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-import contextily as cx
 import geopandas as gpd
 import matplotlib
 matplotlib.use("Agg")
@@ -41,6 +41,7 @@ from matplotlib.lines import Line2D
 from matplotlib.patches import Patch
 import numpy as np
 import osmnx as ox
+import requests
 from pyproj import Transformer
 from shapely.geometry import Point, shape
 from shapely.ops import transform as shp_transform
@@ -48,6 +49,23 @@ from shapely.ops import transform as shp_transform
 
 PROJECT_CRS = "EPSG:4326"
 MAP_CRS = "EPSG:32650"  # WGS 84 / UTM zone 50N
+NATURAL_EARTH_LAND_URL = "https://naturalearth.s3.amazonaws.com/10m_physical/ne_10m_land.zip"
+
+
+def load_natural_earth_land(cache_dir: Path):
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = cache_dir / "ne_10m_land.zip"
+    shp_dir = cache_dir / "ne_10m_land"
+    if not zip_path.exists():
+        r = requests.get(NATURAL_EARTH_LAND_URL, timeout=120)
+        r.raise_for_status()
+        zip_path.write_bytes(r.content)
+    if not shp_dir.exists():
+        shp_dir.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(shp_dir)
+    shp = next(shp_dir.glob("*.shp"))
+    return gpd.read_file(shp)
 
 
 def text_halo():
@@ -301,7 +319,7 @@ def add_north_arrow(ax):
 
 
 def render_map(
-    out_png, out_pdf, out_svg, roads, features,
+    out_png, out_pdf, out_svg, roads, features, land,
     corridor, project_nodes, extraction_date, titled=True
 ):
     roads = roads.to_crs(MAP_CRS)
@@ -309,6 +327,7 @@ def render_map(
     corridor_gdf = gpd.GeoDataFrame(
         {"name": ["Sabah Rail Study Area"]}, geometry=[corridor], crs=PROJECT_CRS
     ).to_crs(MAP_CRS)
+    land = land.to_crs(MAP_CRS)
 
     # Split feature classes.
     water_poly = subset(features, tag_mask(features, "natural", ["water"]) & geom_mask(features, ["Polygon","MultiPolygon"]))
@@ -317,12 +336,13 @@ def render_map(
     builtup = subset(features, tag_mask(features, "landuse", ["residential","commercial","retail"]) & geom_mask(features, ["Polygon","MultiPolygon"]))
 
     railway_lines = subset(features, tag_mask(features, "railway", ["rail"]) & geom_mask(features, ["LineString","MultiLineString"]))
-    railway_points = subset(features, (
-        tag_mask(features, "railway", ["station","halt"]) |
-        tag_mask(features, "public_transport", ["station"])
-    ) & geom_mask(features, ["Point"]))
+    railway_points = subset(
+        features,
+        tag_mask(features, "railway", ["station","halt"]) & geom_mask(features, ["Point"])
+    )
 
     airport_poly = subset(features, tag_mask(features, "aeroway", ["aerodrome","terminal"]) & geom_mask(features, ["Polygon","MultiPolygon"]))
+    airport_labels = subset(features, tag_mask(features, "aeroway", ["aerodrome"]) & geom_mask(features, ["Point","Polygon","MultiPolygon"]))
     runways = subset(features, tag_mask(features, "aeroway", ["runway","taxiway"]) & geom_mask(features, ["LineString","MultiLineString","Polygon","MultiPolygon"]))
 
     port_feats = subset(features, (
@@ -347,19 +367,16 @@ def render_map(
     ax.set_xlim(cxmin - 8500, cxmax + 8500)
     ax.set_ylim(cymin - 3000, cymax + 3000)
 
-    # Clean light basemap.
-    try:
-        cx.add_basemap(
-            ax,
-            source=cx.providers.OpenStreetMap.Mapnik,
-            crs=MAP_CRS,
-            attribution=False,
-            zoom="auto",
-            alpha=0.52,
-            reset_extent=True,
+    # Fully vector background: no web tile provider and no API-key watermark risk.
+    ax.set_facecolor("#dcecf4")
+    if len(land):
+        land.plot(
+            ax=ax,
+            facecolor="#f5f3ee",
+            edgecolor="#c8c3bb",
+            linewidth=0.35,
+            zorder=0,
         )
-    except Exception as exc:
-        print("Basemap warning:", repr(exc))
 
     # Soft contextual fills.
     if len(builtup):
@@ -451,11 +468,15 @@ def render_map(
     # Key infrastructure labels.
     label_major_roads(ax, roads, max_labels=7)
     label_points(ax, railway_points, max_labels=5, fontsize=8)
-    label_points(ax, airport_poly, max_labels=4, fontsize=9)
+    label_points(ax, airport_labels, max_labels=2, fontsize=9)
     # Industrial and port polygons are symbolized but not mass-labelled to avoid clutter.
     # KKIP and Sepanggar Port are already labelled from the verified project reference nodes.
 
-    # Place names are left to the OSM basemap; avoid duplicate text on the presentation layer.
+    # Curated place labels only.
+    if len(places) and "name" in places.columns:
+        keep_names = {"Kota Kinabalu", "Inanam", "Menggatal", "Telipok"}
+        p = places[places["name"].astype(str).isin(keep_names)].copy()
+        label_points(ax, p, max_labels=4, fontsize=8.2)
 
     add_scale_bar(ax, 5)
     add_north_arrow(ax)
@@ -531,7 +552,7 @@ def render_map(
 
     fig.text(
         0.035, 0.018,
-        "Sources: © OpenStreetMap contributors • CARTO basemap • Sabah Rail project study-area GIS. "
+        "Sources: © OpenStreetMap contributors • Natural Earth • Sabah Rail project study-area GIS. "
         "Existing-infrastructure presentation map; proposed alignment intentionally not shown.",
         fontsize=7.1, ha="left"
     )
@@ -558,6 +579,7 @@ def main():
     bbox = expand_bounds(corridor.bounds, args.pad_deg)
 
     roads, features = query_osm(bbox)
+    land = load_natural_earth_land(outdir / "_natural_earth")
 
     # Persist the raw extracted layers for checking/reuse.
     save_geojson(roads, outdir / "Existing_Road_Network_OSM.geojson")
@@ -583,13 +605,13 @@ def main():
         outdir / "Sabah_Rail_Existing_Infrastructure_Slide_4K.png",
         outdir / "Sabah_Rail_Existing_Infrastructure_Map.pdf",
         outdir / "Sabah_Rail_Existing_Infrastructure_Map.svg",
-        roads, features, corridor, project_nodes, extract_date, titled=True
+        roads, features, land, corridor, project_nodes, extract_date, titled=True
     )
 
     render_map(
         outdir / "Sabah_Rail_Existing_Infrastructure_MapOnly_4K.png",
         None, None,
-        roads, features, corridor, project_nodes, extract_date, titled=False
+        roads, features, land, corridor, project_nodes, extract_date, titled=False
     )
 
     counts = {
@@ -613,7 +635,7 @@ def main():
         "source_notes": [
             "Existing infrastructure is based on OpenStreetMap features available at extraction time.",
             "The road network uses OSMnx drive_service network retrieval.",
-            "OpenStreetMap Mapnik tiles are used as a subdued presentation basemap.",
+            "Natural Earth 1:10m land polygons provide a neutral vector coastline/background; no raster tile service is used.",
             "The Sabah Rail study boundary comes from the project-supplied GeoJSON.",
             "OSM is not an authoritative asset register; unmapped/private/new infrastructure may be absent.",
         ],
