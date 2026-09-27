@@ -1,0 +1,81 @@
+name: Build Sabah Rail Authorized Esri Imagery
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sabah-rail-hires-imagery
+    paths:
+      - "data/Sabah_Rail_Study_Area_and_Alignment.geojson"
+      - "tools/sabah_rail_esri_hires_imagery.py"
+      - "requirements-esri-hires-imagery.txt"
+      - ".github/workflows/sabah-rail-esri-hires-imagery.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: sabah-rail-esri-hires-imagery
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      ARCGIS_API_KEY: ${{ secrets.ARCGIS_API_KEY }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install geospatial dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-esri-hires-imagery.txt
+
+      - name: Require ArcGIS credential
+        shell: bash
+        run: |
+          if [ -z "$ARCGIS_API_KEY" ]; then
+            echo "ARCGIS_API_KEY repository secret is not configured."
+            exit 1
+          fi
+
+      - name: Build authorized high-resolution imagery package
+        run: |
+          python tools/sabah_rail_esri_hires_imagery.py \
+            --mode all \
+            --buffer-m 3000 \
+            --maximum-level 19
+
+      - name: Verify required outputs
+        run: |
+          output_dir="output/sabah_rail_esri_hires"
+          test -s "$output_dir/Sabah_Rail_HighRes_Satellite_Presentation_8K.png"
+          test -s "$output_dir/Sabah_Rail_HighRes_Satellite_Presentation_8K_Boundary.png"
+          test -s "$output_dir/Sabah_Rail_HighRes_Satellite_Metadata.json"
+          test -s "$output_dir/Sabah_Rail_HighRes_Satellite_Imagery_Package.zip"
+          find "$output_dir" -maxdepth 1 -type f -printf "%f %s bytes\n"
+          python - <<'PY'
+          import json, pathlib, zipfile
+          root = pathlib.Path("output/sabah_rail_esri_hires")
+          meta = json.loads((root / "Sabah_Rail_HighRes_Satellite_Metadata.json").read_text())
+          assert meta["coverage_audit"]["uncovered_sample_count"] == 0
+          assert meta["authenticated_offline_export"]["authenticated"] is True
+          assert meta["presentation_export"]["width_px"] == 8192
+          package = root / "Sabah_Rail_HighRes_Satellite_Imagery_Package.zip"
+          assert zipfile.is_zipfile(package)
+          assert list(root.glob("*.tpk*")), "Authorized tile package is missing"
+          PY
+
+      - name: Upload Sabah Rail imagery package
+        uses: actions/upload-artifact@v4
+        with:
+          name: Sabah_Rail_HighRes_Satellite_Imagery_Package
+          path: output/sabah_rail_esri_hires/
+          if-no-files-found: error
+          retention-days: 30
