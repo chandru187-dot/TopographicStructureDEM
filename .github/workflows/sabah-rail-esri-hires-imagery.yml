@@ -1,4 +1,4 @@
-name: Build Sabah Rail Authorized Esri Imagery
+name: Build Sabah Rail Esri High-Resolution Imagery
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: sabah-rail-esri-hires-imagery
+  group: sabah-rail-hires-imagery
   cancel-in-progress: false
 
 jobs:
@@ -37,26 +37,31 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements-esri-hires-imagery.txt
 
-      - name: Require ArcGIS credential
+      - name: Select build mode
+        id: build_mode
         shell: bash
         run: |
-          if [ -z "$ARCGIS_API_KEY" ]; then
-            echo "ARCGIS_API_KEY repository secret is not configured."
-            exit 1
+          if [ -n "$ARCGIS_API_KEY" ]; then
+            echo "mode=all" >> "$GITHUB_OUTPUT"
+            echo "authenticated=true" >> "$GITHUB_OUTPUT"
+            echo "ArcGIS credential detected: building presentation plus authorized offline tile package."
+          else
+            echo "mode=presentation" >> "$GITHUB_OUTPUT"
+            echo "authenticated=false" >> "$GITHUB_OUTPUT"
+            echo "No ARCGIS_API_KEY configured: building public imagery audit and 8K presentation preview only."
           fi
 
-      - name: Build authorized high-resolution imagery package
+      - name: Build Sabah Rail imagery package
         run: |
-          python tools/sabah_rail_esri_hires_imagery.py \
-            --mode all \
-            --buffer-m 3000 \
-            --maximum-level 19
+          python tools/sabah_rail_esri_hires_imagery.py             --mode "${{ steps.build_mode.outputs.mode }}"             --buffer-m 3000             --maximum-level 19
 
-      - name: Verify required outputs
+      - name: Verify public imagery outputs
         run: |
           output_dir="output/sabah_rail_esri_hires"
           test -s "$output_dir/Sabah_Rail_HighRes_Satellite_Presentation_8K.png"
           test -s "$output_dir/Sabah_Rail_HighRes_Satellite_Presentation_8K_Boundary.png"
+          test -s "$output_dir/Sabah_Rail_Esri_Imagery_Coverage_Audit.json"
+          test -s "$output_dir/Sabah_Rail_Esri_Imagery_Coverage_Samples.csv"
           test -s "$output_dir/Sabah_Rail_HighRes_Satellite_Metadata.json"
           test -s "$output_dir/Sabah_Rail_HighRes_Satellite_Imagery_Package.zip"
           find "$output_dir" -maxdepth 1 -type f -printf "%f %s bytes\n"
@@ -65,10 +70,21 @@ jobs:
           root = pathlib.Path("output/sabah_rail_esri_hires")
           meta = json.loads((root / "Sabah_Rail_HighRes_Satellite_Metadata.json").read_text())
           assert meta["coverage_audit"]["uncovered_sample_count"] == 0
-          assert meta["authenticated_offline_export"]["authenticated"] is True
+          assert meta["coverage_audit"]["failed_query_count"] == 0
           assert meta["presentation_export"]["width_px"] == 8192
           package = root / "Sabah_Rail_HighRes_Satellite_Imagery_Package.zip"
           assert zipfile.is_zipfile(package)
+          PY
+
+      - name: Verify authorized offline export
+        if: steps.build_mode.outputs.authenticated == 'true'
+        run: |
+          output_dir="output/sabah_rail_esri_hires"
+          python - <<'PY'
+          import json, pathlib
+          root = pathlib.Path("output/sabah_rail_esri_hires")
+          meta = json.loads((root / "Sabah_Rail_HighRes_Satellite_Metadata.json").read_text())
+          assert meta["authenticated_offline_export"]["authenticated"] is True
           assert list(root.glob("*.tpk*")), "Authorized tile package is missing"
           PY
 
