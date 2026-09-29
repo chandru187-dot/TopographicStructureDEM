@@ -7,7 +7,7 @@ on:
       - sabah-rail-hires-imagery
     paths:
       - "config/esri_cloud_request.json"
-      - "tools/esri_cloud_imagery_export.py"
+      - "tools/esri_cloud_imagery_export.py"\n      - "tools/esri_cloud_presentation_images.py"
       - "requirements-esri-hires-imagery.txt"
       - ".github/workflows/esri-cloud-imagery.yml"
 
@@ -73,10 +73,15 @@ jobs:
             --config config/esri_cloud_request.json \
             --mode "${{ steps.mode.outputs.effective }}"
 
+      - name: Build presentation images and detailed sheets
+        run: |
+          python tools/esri_cloud_presentation_images.py \
+            --config config/esri_cloud_request.json
+
       - name: Verify outputs
         run: |
           test -s output/esri_cloud_imagery/manifest.json
-          test -s output/esri_cloud_imagery/imagery_inspection.json
+          test -s output/esri_cloud_imagery/imagery_inspection.json\n          test -s output/esri_cloud_imagery/presentation_images/Sabah_Rail_Satellite_Overall.jpg\n          test -s output/esri_cloud_imagery/presentation_images/Sabah_Rail_Satellite_Overall_With_Alignment.jpg\n          test -s output/esri_cloud_imagery/presentation_images/Sabah_Rail_Satellite_Detail_Sheet_Index.jpg\n          test -s output/esri_cloud_imagery/presentation_images/presentation_images_manifest.json
           cat output/esri_cloud_imagery/manifest.json
 
       - name: Upload results
