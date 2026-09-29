@@ -401,17 +401,30 @@ def result_url(s: requests.Session, job_id: str, job: dict[str, Any], token: str
 
 
 def download_package(s: requests.Session, url: str, token: str, destination: Path) -> None:
-    r = s.get(url, stream=True, timeout=600)
-    if r.status_code in {401, 403, 498, 499} and "arcgis" in (urlparse(url).hostname or ""):
-        r.close()
-        r = s.get(url, params={"token": token}, stream=True, timeout=600)
-    r.raise_for_status()
-    with destination.open("wb") as f:
-        for chunk in r.iter_content(1024 * 1024):
-            if chunk:
-                f.write(chunk)
+    # Esri export-job result URLs can return an HTTP-200 JSON token error when
+    # fetched without authentication. Always attach the token for ArcGIS-hosted
+    # result URLs instead of waiting for an HTTP 401/403 response.
+    hostname = (urlparse(url).hostname or "").lower()
+    params = {"token": token} if ("arcgis.com" in hostname or "arcgisonline.com" in hostname) else None
+    with s.get(url, params=params, stream=True, timeout=600) as r:
+        r.raise_for_status()
+        content_type = (r.headers.get("Content-Type") or "").lower()
+        with destination.open("wb") as f:
+            for chunk in r.iter_content(1024 * 1024):
+                if chunk:
+                    f.write(chunk)
+
     if destination.stat().st_size < 1024 or not zipfile.is_zipfile(destination):
-        raise RuntimeError(f"Downloaded package is invalid or unexpectedly small: {destination}")
+        preview = destination.read_bytes()[:500]
+        try:
+            preview_text = preview.decode("utf-8", errors="replace")
+        except Exception:
+            preview_text = repr(preview)
+        raise RuntimeError(
+            "Downloaded package is invalid or unexpectedly small: "
+            f"{destination}; content-type={content_type!r}; "
+            f"response-preview={preview_text!r}"
+        )
 
 
 def export_imagery(aoi_merc, outdir: Path, max_level: int) -> dict[str, Any]:
