@@ -117,6 +117,46 @@ def resolve_arcgis_token() -> tuple[str, str]:
     )
 
 
+def validate_portal_token(token: str) -> dict[str, Any]:
+    """Validate the token against ArcGIS Online without exposing it."""
+    s = session()
+    r = s.get(
+        "https://www.arcgis.com/sharing/rest/portals/self",
+        params={"f": "json", "token": token},
+        timeout=60,
+    )
+    r.raise_for_status()
+    payload = r.json()
+    check_error(payload, "ArcGIS Online portal token validation")
+    return {
+        "id": payload.get("id"),
+        "name": payload.get("name"),
+        "urlKey": payload.get("urlKey"),
+        "customBaseUrl": payload.get("customBaseUrl"),
+    }
+
+
+def exchange_server_token(portal_token: str) -> str:
+    """Try the documented portal-token -> server-token exchange."""
+    s = session()
+    r = s.post(
+        "https://www.arcgis.com/sharing/rest/generateToken",
+        data={
+            "f": "json",
+            "token": portal_token,
+            "serverURL": "https://tiledbasemaps.arcgis.com/arcgis",
+        },
+        timeout=60,
+    )
+    r.raise_for_status()
+    payload = r.json()
+    check_error(payload, "ArcGIS server-token exchange")
+    token = str(payload.get("token") or "").strip()
+    if not token:
+        raise RuntimeError("ArcGIS server-token exchange returned no token")
+    return token
+
+
 def load_config(path: Path) -> dict[str, Any]:
     data = json.loads(path.read_text(encoding="utf-8"))
     required = ["project_name", "geometry_path"]
@@ -376,8 +416,21 @@ def download_package(s: requests.Session, url: str, token: str, destination: Pat
 
 def export_imagery(aoi_merc, outdir: Path, max_level: int) -> dict[str, Any]:
     token, auth_method = resolve_arcgis_token()
+    portal = validate_portal_token(token)
+    print(
+        "ArcGIS Online token validated for organization: "
+        + str(portal.get("name") or portal.get("urlKey") or portal.get("id") or "unknown")
+    )
+
     s = session()
     info = token_get(s, EXPORT_SERVICE, token, {"f": "json"}).json()
+    if info.get("error"):
+        message = str(info.get("error", {}).get("message", ""))
+        if "invalid token" in message.lower():
+            print("Portal token was not accepted by tiledbasemaps; attempting server-token exchange.")
+            token = exchange_server_token(token)
+            auth_method += " -> server token"
+            info = token_get(s, EXPORT_SERVICE, token, {"f": "json"}).json()
     check_error(info, "World Imagery for Export authentication")
     if not info.get("exportTilesAllowed"):
         raise RuntimeError("The authenticated World Imagery service does not allow exportTiles")
