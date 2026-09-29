@@ -96,3 +96,24 @@ jobs:
           path: output/esri_cloud_imagery/
           if-no-files-found: error
           retention-days: 30
+
+      - name: Upload presentation images and metadata
+        uses: actions/upload-artifact@v4
+        with:
+          name: Esri_Cloud_Presentation_Images_and_Metadata
+          path: |
+            output/esri_cloud_imagery/manifest.json
+            output/esri_cloud_imagery/imagery_inspection.json
+            output/esri_cloud_imagery/presentation_images/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload authorized Esri TPKX separately
+        if: steps.mode.outputs.authenticated == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: Esri_Authorized_World_Imagery_TPKX
+          path: output/esri_cloud_imagery/*.tpkx
+          if-no-files-found: error
+          retention-days: 30
+          compression-level: 0
