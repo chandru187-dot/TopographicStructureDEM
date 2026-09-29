@@ -14,12 +14,13 @@ import hashlib
 import json
 import math
 import os
+import re
 import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 from pyproj import CRS, Transformer
@@ -400,13 +401,78 @@ def result_url(s: requests.Session, job_id: str, job: dict[str, Any], token: str
     raise RuntimeError("Export job succeeded but no download URL was returned")
 
 
-def download_package(s: requests.Session, url: str, token: str, destination: Path) -> None:
-    # Esri export-job result URLs can return an HTTP-200 JSON token error when
-    # fetched without authentication. Always attach the token for ArcGIS-hosted
-    # result URLs instead of waiting for an HTTP 401/403 response.
+def _auth_params_for_url(url: str, token: str) -> dict[str, str] | None:
     hostname = (urlparse(url).hostname or "").lower()
-    params = {"token": token} if ("arcgis.com" in hostname or "arcgisonline.com" in hostname) else None
-    with s.get(url, params=params, stream=True, timeout=600) as r:
+    if "arcgis.com" in hostname or "arcgisonline.com" in hostname:
+        return {"token": token}
+    return None
+
+
+def _resolve_export_file_url(
+    s: requests.Session,
+    url: str,
+    token: str,
+    max_depth: int = 3,
+) -> str:
+    """Resolve Esri arcgisoutput directory pages to the actual TPK/TPKX file."""
+    current = url
+    visited: set[str] = set()
+    for _ in range(max_depth + 1):
+        if current in visited:
+            break
+        visited.add(current)
+
+        r = s.get(
+            current,
+            params=_auth_params_for_url(current, token),
+            timeout=120,
+        )
+        r.raise_for_status()
+        content_type = (r.headers.get("Content-Type") or "").lower()
+        final_url = r.url
+
+        if "text/html" not in content_type:
+            return current
+
+        html = r.text
+        hrefs = re.findall(r'''href=["']([^"']+)["']''', html, flags=re.IGNORECASE)
+        links = [urljoin(final_url, href) for href in hrefs]
+
+        packages = [
+            link for link in links
+            if urlparse(link).path.lower().endswith((".tpkx", ".tpk"))
+        ]
+        if packages:
+            # Prefer TPKX where both formats are exposed.
+            packages.sort(key=lambda link: (not urlparse(link).path.lower().endswith(".tpkx"), link))
+            resolved = packages[0]
+            print(f"Resolved Esri export directory to package: {urlparse(resolved).path}")
+            return resolved
+
+        # Some ArcGIS output listings contain one additional subdirectory.
+        subdirs = [
+            link for link in links
+            if "/arcgisoutput/" in urlparse(link).path.lower()
+            and link.rstrip("/") != final_url.rstrip("/")
+            and not urlparse(link).path.lower().endswith((".css", ".js"))
+        ]
+        if subdirs:
+            current = subdirs[0]
+            continue
+
+        preview = html[:800].replace(token, "[REDACTED]")
+        raise RuntimeError(
+            "Esri export result resolved to an HTML directory but no TPK/TPKX "
+            f"link was found. url={final_url!r}; preview={preview!r}"
+        )
+
+    raise RuntimeError(f"Could not resolve Esri export result URL to a package: {url}")
+
+
+def download_package(s: requests.Session, url: str, token: str, destination: Path) -> None:
+    file_url = _resolve_export_file_url(s, url, token)
+    params = _auth_params_for_url(file_url, token)
+    with s.get(file_url, params=params, stream=True, timeout=900) as r:
         r.raise_for_status()
         content_type = (r.headers.get("Content-Type") or "").lower()
         with destination.open("wb") as f:
@@ -420,6 +486,7 @@ def download_package(s: requests.Session, url: str, token: str, destination: Pat
             preview_text = preview.decode("utf-8", errors="replace")
         except Exception:
             preview_text = repr(preview)
+        preview_text = preview_text.replace(token, "[REDACTED]")
         raise RuntimeError(
             "Downloaded package is invalid or unexpectedly small: "
             f"{destination}; content-type={content_type!r}; "
