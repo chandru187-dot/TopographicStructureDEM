@@ -1,0 +1,17 @@
+{
+  "generated_utc": "2026-09-29T07:02:03.979654+00:00",
+  "project_geometry": "data/Sabah_Rail_Study_Area_and_Alignment.geojson",
+  "project_alignment_name": "Proposed Feasible Alignment_ 44.3km",
+  "traffic_locations": 19,
+  "context_source": "OpenStreetMap via OSMnx; CartoDB Positron basemap when available",
+  "outputs": [
+    "TN3_R3_Study_Corridor_Existing_Infrastructure.png",
+    "TN3_R3_Traffic_Survey_Locations.png",
+    "TN3_R3_Freight_Market_Nodes.png"
+  ],
+  "notes": [
+    "Traffic coordinates are from the current TN3 working survey-location figure.",
+    "Freight node locations N1/N2/N3/N6 are conceptual market anchors, not terminal designs.",
+    "Maps are for feasibility reporting, not detailed engineering or cadastral boundary use."
+  ]
+}
