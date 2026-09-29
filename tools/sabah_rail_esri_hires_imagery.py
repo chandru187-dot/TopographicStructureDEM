@@ -517,6 +517,75 @@ def estimate_aoi_tile_count(aoi_mercator, levels: Iterable[int]) -> dict[str, in
     return counts
 
 
+def resolve_arcgis_token() -> tuple[str, str]:
+    """Resolve an ArcGIS access token without storing a username/password.
+
+    Supported GitHub-secret combinations, in priority order:
+    1. ARCGIS_TOKEN        - short-lived user access token (best for quick trial testing)
+    2. ARCGIS_API_KEY      - API key / access token if the connected account permits export
+    3. ARCGIS_CLIENT_ID + ARCGIS_REFRESH_TOKEN
+                           - OAuth user authentication; refreshes an access token at run time
+    4. ARCGIS_CLIENT_ID + ARCGIS_CLIENT_SECRET
+                           - OAuth app authentication (not available on ArcGIS Online Trial)
+    """
+    direct = os.environ.get("ARCGIS_TOKEN", "").strip()
+    if direct:
+        return direct, "ARCGIS_TOKEN"
+
+    api_key = os.environ.get("ARCGIS_API_KEY", "").strip()
+    if api_key:
+        return api_key, "ARCGIS_API_KEY"
+
+    client_id = os.environ.get("ARCGIS_CLIENT_ID", "").strip()
+    refresh_token = os.environ.get("ARCGIS_REFRESH_TOKEN", "").strip()
+    if client_id and refresh_token:
+        response = requests.post(
+            "https://www.arcgis.com/sharing/rest/oauth2/token/",
+            data={
+                "f": "json",
+                "client_id": client_id,
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+            },
+            timeout=60,
+            headers={"User-Agent": USER_AGENT},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        check_error(payload, "ArcGIS OAuth refresh-token exchange")
+        token = str(payload.get("access_token") or "").strip()
+        if not token:
+            raise RuntimeError(f"ArcGIS OAuth response did not contain an access token: {payload}")
+        return token, "ARCGIS_CLIENT_ID + ARCGIS_REFRESH_TOKEN"
+
+    client_secret = os.environ.get("ARCGIS_CLIENT_SECRET", "").strip()
+    if client_id and client_secret:
+        response = requests.post(
+            "https://www.arcgis.com/sharing/rest/oauth2/token/",
+            data={
+                "f": "json",
+                "client_id": client_id,
+                "client_secret": client_secret,
+                "grant_type": "client_credentials",
+            },
+            timeout=60,
+            headers={"User-Agent": USER_AGENT},
+        )
+        response.raise_for_status()
+        payload = response.json()
+        check_error(payload, "ArcGIS OAuth client-credentials exchange")
+        token = str(payload.get("access_token") or "").strip()
+        if not token:
+            raise RuntimeError(f"ArcGIS OAuth response did not contain an access token: {payload}")
+        return token, "ARCGIS_CLIENT_ID + ARCGIS_CLIENT_SECRET"
+
+    raise RuntimeError(
+        "Authenticated World Imagery export requires one of: ARCGIS_TOKEN, "
+        "ARCGIS_API_KEY, ARCGIS_CLIENT_ID + ARCGIS_REFRESH_TOKEN, or "
+        "ARCGIS_CLIENT_ID + ARCGIS_CLIENT_SECRET."
+    )
+
+
 def token_request(
     session: requests.Session,
     method: str,
@@ -925,17 +994,15 @@ def main():
         )
 
     if args.mode in {"export", "all"}:
-        api_key = os.environ.get("ARCGIS_API_KEY", "").strip()
-        if not api_key:
-            raise RuntimeError(
-                "ARCGIS_API_KEY is required for the authenticated World Imagery export"
-            )
+        access_token, auth_method = resolve_arcgis_token()
+        print(f"ArcGIS authentication resolved via {auth_method}.")
         authenticated_export = export_authorized_tile_package(
             context_mercator,
             outdir,
-            api_key,
+            access_token,
             args.maximum_level,
         )
+        authenticated_export["authentication_method"] = auth_method
 
     write_limitations(outdir)
     metadata_path = write_metadata(
