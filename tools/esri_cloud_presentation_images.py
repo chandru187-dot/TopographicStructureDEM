@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Iterable
@@ -69,18 +70,36 @@ def fetch_export(bounds, width: int, height: int) -> Image.Image:
         "transparent": "false",
         "f": "image",
     }
-    r = requests.get(
-        f"{PUBLIC_SERVICE}/export",
-        params=params,
-        timeout=180,
-        headers={"User-Agent": USER_AGENT},
-    )
-    r.raise_for_status()
-    ctype = (r.headers.get("Content-Type") or "").lower()
-    if not ctype.startswith("image/"):
-        raise RuntimeError(f"World Imagery export returned {ctype!r}: {r.text[:500]}")
-    from io import BytesIO
-    return Image.open(BytesIO(r.content)).convert("RGB")
+    last_error = None
+    for attempt in range(5):
+        try:
+            r = requests.get(
+                f"{PUBLIC_SERVICE}/export",
+                params=params,
+                timeout=180,
+                headers={"User-Agent": USER_AGENT},
+            )
+            if r.status_code in {429, 500, 502, 503, 504}:
+                raise requests.HTTPError(
+                    f"Transient Esri HTTP {r.status_code}",
+                    response=r,
+                )
+            r.raise_for_status()
+            ctype = (r.headers.get("Content-Type") or "").lower()
+            if not ctype.startswith("image/"):
+                raise RuntimeError(
+                    f"World Imagery export returned {ctype!r}: {r.text[:500]}"
+                )
+            from io import BytesIO
+            return Image.open(BytesIO(r.content)).convert("RGB")
+        except (requests.RequestException, RuntimeError) as exc:
+            last_error = exc
+            if attempt == 4:
+                break
+            wait_s = 2 ** attempt
+            print(f"Esri export retry {attempt + 1}/4 after {wait_s}s: {exc}")
+            time.sleep(wait_s)
+    raise RuntimeError(f"World Imagery export failed after retries: {last_error}")
 
 
 def transform_geom(geom, src, dst):
@@ -335,7 +354,7 @@ def main():
         step_m=float(img_cfg.get("detail_sheet_step_m", 1000)),
         extent_m=float(img_cfg.get("detail_sheet_extent_m", 1200)),
         pixels=int(img_cfg.get("detail_sheet_px", 2048)),
-        workers=int(img_cfg.get("detail_sheet_workers", 6)),
+        workers=int(img_cfg.get("detail_sheet_workers", 4)),
     )
 
     index = overview.copy()
