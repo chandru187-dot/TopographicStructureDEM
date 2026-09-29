@@ -5,5 +5,5 @@
   "maximum_level": 19,
   "requested_mode": "export",
   "output_dir": "output/esri_cloud_imagery",
-  "trigger_id": "arcgis-online-auth-test-2026-09-29-1"
+  "trigger_id": "arcgis-online-auth-test-2026-09-29-2"
 }
