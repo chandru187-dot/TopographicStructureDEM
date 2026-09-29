@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Iterable
 
@@ -228,20 +229,32 @@ def build_detail_sheets(
     step_m: float,
     extent_m: float,
     pixels: int,
+    workers: int = 6,
 ):
     to_merc = Transformer.from_crs(local_crs, WEB_MERCATOR, always_xy=True)
-    records = []
     clean_dir = outdir / "detail_clean"
     overlay_dir = outdir / "detail_with_alignment"
     clean_dir.mkdir(parents=True, exist_ok=True)
     overlay_dir.mkdir(parents=True, exist_ok=True)
 
     half = extent_m / 2
+    jobs = []
     for sheet_no, p, ch_start, ch_end in sheet_centers(alignment_local, step_m):
         local_box = box(p.x - half, p.y - half, p.x + half, p.y + half)
         merc_box = shp_transform(to_merc.transform, local_box)
         bounds = list(map(float, merc_box.bounds))
+        center_x, center_y = to_merc.transform(p.x, p.y)
+        jobs.append({
+            "sheet": sheet_no,
+            "chainage_start_m_approx": round(ch_start, 1),
+            "chainage_end_m_approx": round(ch_end, 1),
+            "center_epsg3857": [center_x, center_y],
+            "bounds_epsg3857": bounds,
+        })
 
+    def build_one(rec):
+        sheet_no = rec["sheet"]
+        bounds = rec["bounds_epsg3857"]
         clean = fetch_export(bounds, pixels, pixels)
         add_attribution(clean)
         clean_path = clean_dir / f"Sabah_Rail_Detail_{sheet_no:02d}_clean.jpg"
@@ -253,19 +266,24 @@ def build_detail_sheets(
         overlay_path = overlay_dir / f"Sabah_Rail_Detail_{sheet_no:02d}_alignment.jpg"
         overlay.save(overlay_path, "JPEG", quality=94, subsampling=0, optimize=True)
 
-        center_x, center_y = to_merc.transform(p.x, p.y)
-        records.append({
-            "sheet": sheet_no,
-            "chainage_start_m_approx": round(ch_start, 1),
-            "chainage_end_m_approx": round(ch_end, 1),
-            "center_epsg3857": [center_x, center_y],
-            "bounds_epsg3857": bounds,
+        return {
+            **rec,
             "ground_extent_m_local": extent_m,
             "pixel_width": pixels,
             "nominal_local_ground_pixel_m": extent_m / pixels,
             "clean_image": str(clean_path.relative_to(outdir)),
             "alignment_image": str(overlay_path.relative_to(outdir)),
-        })
+        }
+
+    records = []
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as executor:
+        futures = {executor.submit(build_one, rec): rec["sheet"] for rec in jobs}
+        for future in as_completed(futures):
+            record = future.result()
+            records.append(record)
+            print(f"Completed detail sheet {record['sheet']:02d}/{len(jobs):02d}")
+
+    records.sort(key=lambda rec: rec["sheet"])
     return records
 
 
@@ -317,6 +335,7 @@ def main():
         step_m=float(img_cfg.get("detail_sheet_step_m", 1000)),
         extent_m=float(img_cfg.get("detail_sheet_extent_m", 1200)),
         pixels=int(img_cfg.get("detail_sheet_px", 2048)),
+        workers=int(img_cfg.get("detail_sheet_workers", 6)),
     )
 
     index = overview.copy()
