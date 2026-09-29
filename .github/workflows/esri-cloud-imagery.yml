@@ -1,0 +1,87 @@
+name: Cloud Esri World Imagery Engine
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - sabah-rail-hires-imagery
+    paths:
+      - "config/esri_cloud_request.json"
+      - "tools/esri_cloud_imagery_export.py"
+      - "requirements-esri-hires-imagery.txt"
+      - ".github/workflows/esri-cloud-imagery.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: esri-cloud-imagery
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      ARCGIS_TOKEN: ${{ secrets.ARCGIS_TOKEN }}
+      ARCGIS_API_KEY: ${{ secrets.ARCGIS_API_KEY }}
+      ARCGIS_CLIENT_ID: ${{ secrets.ARCGIS_CLIENT_ID }}
+      ARCGIS_CLIENT_SECRET: ${{ secrets.ARCGIS_CLIENT_SECRET }}
+      ARCGIS_REFRESH_TOKEN: ${{ secrets.ARCGIS_REFRESH_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-esri-hires-imagery.txt
+
+      - name: Select effective mode
+        id: mode
+        shell: bash
+        run: |
+          requested="$(python -c 'import json; print(json.load(open("config/esri_cloud_request.json"))["requested_mode"])')"
+          auth=false
+          if [ -n "$ARCGIS_TOKEN" ] || [ -n "$ARCGIS_API_KEY" ] || \
+             { [ -n "$ARCGIS_CLIENT_ID" ] && [ -n "$ARCGIS_REFRESH_TOKEN" ]; } || \
+             { [ -n "$ARCGIS_CLIENT_ID" ] && [ -n "$ARCGIS_CLIENT_SECRET" ]; }; then
+            auth=true
+          fi
+
+          if [ "$requested" = "export" ] && [ "$auth" = "true" ]; then
+            effective=export
+          else
+            effective=inspect
+          fi
+
+          echo "requested=$requested" >> "$GITHUB_OUTPUT"
+          echo "effective=$effective" >> "$GITHUB_OUTPUT"
+          echo "authenticated=$auth" >> "$GITHUB_OUTPUT"
+          echo "Requested mode: $requested"
+          echo "Effective mode: $effective"
+          echo "ArcGIS export credential present: $auth"
+
+      - name: Run cloud imagery engine
+        run: |
+          python tools/esri_cloud_imagery_export.py \
+            --config config/esri_cloud_request.json \
+            --mode "${{ steps.mode.outputs.effective }}"
+
+      - name: Verify outputs
+        run: |
+          test -s output/esri_cloud_imagery/manifest.json
+          test -s output/esri_cloud_imagery/imagery_inspection.json
+          cat output/esri_cloud_imagery/manifest.json
+
+      - name: Upload results
+        uses: actions/upload-artifact@v4
+        with:
+          name: Esri_Cloud_Imagery_Result
+          path: output/esri_cloud_imagery/
+          if-no-files-found: error
+          retention-days: 30
