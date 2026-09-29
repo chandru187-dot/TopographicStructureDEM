@@ -17,7 +17,7 @@ permissions:
 
 concurrency:
   group: esri-cloud-imagery
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   run:
