@@ -42,7 +42,11 @@ def now_utc() -> str:
 
 def session() -> requests.Session:
     s = requests.Session()
-    s.headers.update({"User-Agent": USER_AGENT})
+    headers = {"User-Agent": USER_AGENT}
+    referer = os.environ.get("ARCGIS_REFERER", "").strip()
+    if referer:
+        headers["Referer"] = referer
+    s.headers.update(headers)
     s.mount("https://", requests.adapters.HTTPAdapter(max_retries=3))
     return s
 
