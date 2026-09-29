@@ -5,7 +5,7 @@
   "maximum_level": 19,
   "requested_mode": "export",
   "output_dir": "output/esri_cloud_imagery",
-  "trigger_id": "sabah-presentation-images-2026-09-29-1",
+  "trigger_id": "sabah-presentation-images-2026-09-29-2",
   "presentation_images": {
     "enabled": true,
     "overview_padding_m": 1000,
@@ -13,6 +13,7 @@
     "max_export_request_px": 2048,
     "detail_sheet_step_m": 1000,
     "detail_sheet_extent_m": 1200,
-    "detail_sheet_px": 2048
+    "detail_sheet_px": 2048,
+    "detail_sheet_workers": 4
   }
 }
