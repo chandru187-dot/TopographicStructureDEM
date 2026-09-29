@@ -23,7 +23,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 90
     env:
+      ARCGIS_TOKEN: ${{ secrets.ARCGIS_TOKEN }}
       ARCGIS_API_KEY: ${{ secrets.ARCGIS_API_KEY }}
+      ARCGIS_CLIENT_ID: ${{ secrets.ARCGIS_CLIENT_ID }}
+      ARCGIS_CLIENT_SECRET: ${{ secrets.ARCGIS_CLIENT_SECRET }}
+      ARCGIS_REFRESH_TOKEN: ${{ secrets.ARCGIS_REFRESH_TOKEN }}
 
     steps:
       - uses: actions/checkout@v4
@@ -41,14 +45,16 @@ jobs:
         id: build_mode
         shell: bash
         run: |
-          if [ -n "$ARCGIS_API_KEY" ]; then
+          if [ -n "$ARCGIS_TOKEN" ] || [ -n "$ARCGIS_API_KEY" ] || \
+             { [ -n "$ARCGIS_CLIENT_ID" ] && [ -n "$ARCGIS_REFRESH_TOKEN" ]; } || \
+             { [ -n "$ARCGIS_CLIENT_ID" ] && [ -n "$ARCGIS_CLIENT_SECRET" ]; }; then
             echo "mode=all" >> "$GITHUB_OUTPUT"
             echo "authenticated=true" >> "$GITHUB_OUTPUT"
             echo "ArcGIS credential detected: building presentation plus authorized offline tile package."
           else
             echo "mode=presentation" >> "$GITHUB_OUTPUT"
             echo "authenticated=false" >> "$GITHUB_OUTPUT"
-            echo "No ARCGIS_API_KEY configured: building public imagery audit and 8K presentation preview only."
+            echo "No ArcGIS export credential configured: building public imagery audit and 8K presentation preview only."
           fi
 
       - name: Build Sabah Rail imagery package
