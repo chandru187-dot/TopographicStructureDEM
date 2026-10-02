@@ -9,3 +9,7 @@ outputs/
 *.pdf
 *.kmz
 *.zip
+
+private-inputs/
+secrets/
+work-output/

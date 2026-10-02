@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from .engine import Engine, Scenario
 from .store import Store
 
-app=FastAPI(title='Sabah Rail Integrated Model',version='0.2.0')
+app=FastAPI(title='Sabah Rail Integrated Model',version='0.3.0')
 lock=threading.Lock()
 
 
@@ -43,7 +43,7 @@ def engine():return Engine()
 
 
 @app.get('/health')
-def health():return {'service':'sabah-rail','version':'0.2.0','ready':bool(os.getenv('MODEL_API_TOKEN') or os.getenv('MODEL_DEV_MODE')=='1')}
+def health():return {'service':'sabah-rail','version':'0.3.0','ready':bool(os.getenv('MODEL_API_TOKEN') or os.getenv('MODEL_DEV_MODE')=='1')}
 
 
 @app.get('/',response_class=HTMLResponse)
