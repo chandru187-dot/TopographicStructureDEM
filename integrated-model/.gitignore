@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+.env
+data/
+evidence/
+outputs/
+*.sqlite*
+*.xlsx
+*.pdf
+*.kmz
+*.zip
