@@ -1,0 +1,15 @@
+{
+  "schema": "sabah-work-bridge/1",
+  "request_id": "bd5af15f-08c9-4f41-a182-6f0e24e9e99e",
+  "data_sha256": "8d87043bf52e0f53470328c8e9ec06a32160b7e2f20c7a2a91deabe4d3b1dbc3",
+  "ciphertext_sha256": "9841e946fc42c20011e977181651e553d68331b299d6924ba1afb5e2744ef748",
+  "scenario": {
+    "case": "Base",
+    "year": 2045,
+    "option": 3,
+    "freight_package": "S2",
+    "overrides": {}
+  },
+  "input_policy": "explicit_draft",
+  "classification": "Confidential encrypted input; draft baseline alternatives retained"
+}
