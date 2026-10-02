@@ -25,11 +25,17 @@ def export_workbook(path,runs,data):
  def sheet(name,heads,rows):
   s=wb.add_worksheet(name);s.hide_gridlines(2);s.set_tab_color('#245C91');s.merge_range(0,0,0,max(2,len(heads)-1),name.upper()+' · '+('SYNTHETIC TEST ONLY' if synthetic else 'DRAFT AUDIT'),title);s.set_row(0,30);s.write_row(2,0,heads,header);s.set_row(2,32);s.set_column(0,len(heads)-1,24);s.set_column(0,0,32);s.freeze_panes(3,0)
   for row,vals in enumerate(rows,3):
-   s.set_row(row,30)
-   for col,v in enumerate(vals):write_value(s,row,col,v)
+   lines=1
+   for col,v in enumerate(vals):
+    value=json.dumps(v,ensure_ascii=False)if isinstance(v,(dict,list))else str(v)
+    width=32 if col==0 else 24
+    if not isinstance(v,(int,float)):
+     lines=max(lines,sum(max(1,math.ceil(len(part)/width))for part in value.split('\n')))
+    write_value(s,row,col,v)
+   s.set_row(row,min(409,max(30,lines*13+8)))
   if rows:s.autofilter(2,0,len(rows)+2,len(heads)-1)
   return s
- summary=sheet('Summary',['Measure','Value','Interpretation'],[['Status',selected['validation_status'],data['governance_status']],['Passenger trips/day',p['daily_source_trips'],'Source units; interpretation retained'],['Passenger trips/year',p['annual_source_trips'],'Annualisation in Passenger Calc'],['Freight tonnes/year',f['tonnes_year'],'Selected variant/package'],['Freight TEU/year',f['teu_year'],'Includes empty equipment when source does'],['Road VKT avoided',selected['traffic']['net_vkt_avoided'],'Missing data withheld'],['Accidents avoided',selected['safety']['accidents_avoided_year'],'Comparable exposure required'],['Annual economic benefit',selected['economic']['complete_annual_benefit_rm'],'Partial subtotal is not complete benefit'],['Run ID',selected['run_id'],'Immutable input snapshot supplied'],['Model version',selected['model_version'],'Git commit in Run Register'],['Execution environment','GitHub Actions batch / Work test','Actual environment recorded in batch manifest']]);summary.set_column(2,2,64)
+ summary=sheet('Summary',['Measure','Value','Interpretation'],[['Status',selected['validation_status'],data['governance_status']],['Passenger trips/day',p['daily_source_trips'],'Source units; interpretation retained'],['Passenger trips/year',p['annual_source_trips'],'Annualisation in Passenger Calc'],['Freight tonnes/year',f['tonnes_year'],'Selected variant/package'],['Freight TEU/year',f['teu_year'],'Includes empty equipment when source does'],['Road VKT avoided',selected['traffic']['net_vkt_avoided'],'Missing data withheld'],['Accidents avoided',selected['safety']['accidents_avoided_year'],'Comparable exposure required'],['Annual economic benefit',selected['economic']['complete_annual_benefit_rm'],'Partial subtotal is not complete benefit'],['Run ID',selected['run_id'],'Immutable input snapshot supplied'],['Model version',selected['model_version'],'Git commit in Run Register'],['Execution environment','GitHub Actions batch / Work test','Actual environment recorded in batch manifest'],['Selected case',selected['scenario']['case'],'First run in comparison; see Scenarios for all cases'],['Forecast year',selected['scenario']['year'],'years'],['Passenger option',selected['scenario'].get('option',3),'Draft option coding; approved alignment crosswalk unresolved']]);summary.set_column(2,2,64)
  controls=sheet('Controls',['Input','Value','Unit / provenance'],[['Daily trips',p['daily_source_trips'],'selected Python source forecast'],['Passenger days',selected['effective_assumptions']['passenger_days'],'days/year; draft source convention'],['Headway',selected['operations']['headway_min'],'minutes'],['Hours',selected['operations']['service_hours'],'hours/day']]);controls.set_column(2,2,50)
  pc=sheet('Passenger Calc',['Measure','Formula mirror','Python reference','Residual'],[['Daily trips',None,p['daily_source_trips'],None],['Annual trips',None,p['annual_source_trips'],None]])
  pc.write_formula('B4','=Controls!B4',linked,p['daily_source_trips']);pc.write_formula('B5','=B4*Controls!B5',num,p['annual_source_trips']);pc.write_formula('D4','=B4-C4',num,0);pc.write_formula('D5','=B5-C5',num,0)
