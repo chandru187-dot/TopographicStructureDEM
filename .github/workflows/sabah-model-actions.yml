@@ -1,0 +1,165 @@
+name: Sabah Rail Actions Model
+run-name: Sabah Rail ${{ inputs.profile || 'synthetic' }} · ${{ inputs.year || '2045' }} · ${{ inputs.case || 'Base' }}
+on:
+  push:
+    branches: [sabah-rail-actions-v0.3.0]
+    paths: ['integrated-model/**', '.github/workflows/sabah-model-actions.yml']
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Synthetic execution test or encrypted private project request'
+        required: true
+        type: choice
+        options: [synthetic, private]
+        default: synthetic
+      year:
+        description: 'Forecast year within source envelope'
+        required: true
+        default: '2045'
+      case:
+        description: 'Demand case'
+        type: choice
+        options: [Base, Low, High]
+        default: Base
+      headway:
+        description: 'Headway in minutes (no calibrated demand response assumed)'
+        default: '20'
+      request:
+        description: 'Private encrypted manifest path: requests/<UUID>/request.json'
+        default: ''
+permissions:
+  contents: read
+concurrency:
+  group: sabah-model-${{ github.ref }}-${{ inputs.profile || 'synthetic' }}
+  cancel-in-progress: false
+jobs:
+  public-execution-test:
+    if: github.event_name == 'push' || inputs.profile == 'synthetic'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: integrated-model
+    env:
+      CASE: ${{ inputs.case || 'Base' }}
+      YEAR: ${{ inputs.year || '2045' }}
+      HEADWAY: ${{ inputs.headway || '20' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: sabah-rail-actions-v0.3.0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: integrated-model/pyproject.toml
+      - name: Record exact model commit
+        run: echo "MODEL_GIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Install public-registry Python environment
+        run: pip install -r requirements-actions.txt
+      - name: Unit and integration checks (synthetic, no private evidence)
+        run: python -m unittest discover -s tests -v
+      - name: Run model, scenario comparison and Excel export
+        run: python -m railmodel.batch --synthetic --case "$CASE" --year "$YEAR" --headway "$HEADWAY" --compare --output "$RUNNER_TEMP/sabah-synthetic"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Sabah-model-SYNTHETIC-${{ github.run_id }}
+          path: ${{ runner.temp }}/sabah-synthetic/
+          retention-days: 3
+          if-no-files-found: error
+      - name: Run summary
+        run: echo 'Synthetic Python/Excel execution only. No Sabah Rail demand values or confidential inputs are in this artifact.' >> "$GITHUB_STEP_SUMMARY"
+  postgis-integration:
+    if: github.event_name == 'push' || inputs.profile == 'synthetic'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgis:
+        image: postgis/postgis:16-3.5
+        env:
+          POSTGRES_USER: test_runner
+          POSTGRES_PASSWORD: disposable_ci_only
+          POSTGRES_DB: sabah_ci
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U test_runner -d sabah_ci"
+          --health-interval 10s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: integrated-model
+    env:
+      DATABASE_URL: postgresql://test_runner:disposable_ci_only@localhost:5432/sabah_ci
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: sabah-rail-actions-v0.3.0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: integrated-model/pyproject.toml
+      - run: pip install -r requirements-actions.txt
+      - name: Verify real PostgreSQL/PostGIS migration and persistence
+        run: python scripts/test_postgis.py
+  private-project-model:
+    if: github.event_name == 'workflow_dispatch' && inputs.profile == 'private'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: integrated-model
+    env:
+      REQUEST: ${{ inputs.request }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: sabah-rail-actions-v0.3.0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: integrated-model/pyproject.toml
+      - run: pip install -r requirements-actions.txt
+      - name: Record exact model commit
+        run: echo "MODEL_GIT_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+      - name: Verify encrypted request path and secret availability
+        env:
+          SABAH_RAIL_BRIDGE_KEY: ${{ secrets.SABAH_RAIL_BRIDGE_KEY }}
+        run: |
+          python - <<'PY'
+          import os,re
+          from pathlib import Path
+          from railmodel.bridge import cipher
+          if not re.fullmatch(r'requests/[a-f0-9-]{36}/request.json',os.environ['REQUEST']):raise SystemExit('Invalid request path')
+          if not Path(os.environ['REQUEST']).is_file():raise SystemExit('Encrypted request not found')
+          cipher()
+          print('Encrypted request and secret preflight PASS')
+          PY
+      - name: Execute authoritative private model
+        env:
+          SABAH_RAIL_BRIDGE_KEY: ${{ secrets.SABAH_RAIL_BRIDGE_KEY }}
+        run: python -m railmodel.batch --request "$REQUEST" --compare --output "$RUNNER_TEMP/sabah-private"
+      - name: Encrypt outputs (never upload plaintext)
+        if: always()
+        env:
+          SABAH_RAIL_BRIDGE_KEY: ${{ secrets.SABAH_RAIL_BRIDGE_KEY }}
+        run: |
+          if [ -d "$RUNNER_TEMP/sabah-private" ]; then
+            python -m railmodel.bridge encrypt-output --input "$RUNNER_TEMP/sabah-private" --output "$RUNNER_TEMP/sabah-output.enc"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: Sabah-model-ENCRYPTED-${{ github.run_id }}
+          path: ${{ runner.temp }}/sabah-output.enc
+          retention-days: 3
+          if-no-files-found: ignore
+      - name: Remove transient plaintext
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/sabah-private"
+      - name: Private run summary
+        if: success()
+        run: echo 'Private results are encrypted. ChatGPT Work decrypts and returns versioned outputs to the authorised Sabah Rail Google Drive folder.' >> "$GITHUB_STEP_SUMMARY"
